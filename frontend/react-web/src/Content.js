@@ -88,6 +88,7 @@ function Content({ signOut, user }) {
 
             // Handle messages from audio processor
             audioWorkletNodeRef.current.port.onmessage = (event) => {
+
                 if (event.data === 'needData') {
                     setTalking(false);
                 }
@@ -173,7 +174,9 @@ function Content({ signOut, user }) {
             };
 
             wsRef.current.onmessage = async (event) => {
+//                console.log({event});
                 const chunk = JSON.parse(event.data);
+                console.log({chunk});
 
                 if (chunk.event === 'stop') {
                     console.log('Interruption')

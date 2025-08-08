@@ -22,11 +22,12 @@
 export const awsConfig = {
     Auth: {
         Cognito: {
-            userPoolClientId: '3f7bapxxxxxxxxxxxxx34u4eh',
-            userPoolId: 'ap-south-1_xxxxxxxx',
-            identityPoolId: 'ap-south-1:1111111-aaaa-bbbb-cccc-23hsjfk33412',
+            userPoolClientId: '236cq8eukd1ue7gj1k1jlb5e2u',
+            userPoolId: 'ap-south-1_B6Axy9fFu',
+            identityPoolId: 'ap-south-1:9cae03c3-7f68-4c6a-b204-10943b5c8d1b',
             region: 'ap-south-1'
         }
+
     }
 }
 
@@ -44,7 +45,8 @@ export const apiKey = "Your-own-long-secret-text-to-access-the-api"
  * @constant
  * @type {string}
  */
-export const apiUrl = "wss://vba.example.acme/ws"
+//export const apiUrl = "wss://vba.example.acme/ws"
+export const apiUrl = "ws://localhost:8000/ws"
 
 /**
  * Avatar .glb model filename

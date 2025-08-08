@@ -48,8 +48,8 @@ from pipecat.pipeline.pipeline import Pipeline
 from pipecat.pipeline.runner import PipelineRunner
 from pipecat.pipeline.task import PipelineParams, PipelineTask
 from pipecat.processors.aggregators.openai_llm_context import OpenAILLMContext
-# from pipecat.services.aws_nova_sonic.aws import AWSNovaSonicLLMService, Params
-from aws import AWSNovaSonicLLMService, Params
+from pipecat.services.aws_nova_sonic.aws import AWSNovaSonicLLMService, Params
+# from aws import AWSNovaSonicLLMService, Params
 from pipecat.services.llm_service import FunctionCallParams
 from pipecat.transports.base_transport import BaseTransport, TransportParams
 from pipecat.transports.network.fastapi_websocket import FastAPIWebsocketTransport, FastAPIWebsocketParams
@@ -57,9 +57,12 @@ from pipecat.serializers.plivo import PlivoFrameSerializer
 from pipecat.processors.logger import FrameLogger
 from pipecat.processors.transcript_processor import TranscriptProcessor
 
+from app.aws_client_assume import get_session_token
 from base64_serializer import Base64AudioSerializer
+from sql_generator import SQLQueryGenerator
 
 SAMPLE_RATE = 16000
+sql_generator = SQLQueryGenerator()
 API_KEY = "Your-own-long-secret-text-to-access-the-api"
 
 def update_dredentials():
@@ -68,68 +71,99 @@ def update_dredentials():
     Used in containerized environments to maintain fresh credentials.
     """
     try:
-        uri = os.environ.get("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI")
-        if uri:
-            print("Fetching fresh AWS credentials for Bedrock client", flush=True)
-            with httpx.Client() as client:
-                response = client.get(f"http://169.254.170.2{uri}")
-                if response.status_code == 200:
-                    creds = response.json()
-                    os.environ["AWS_ACCESS_KEY_ID"] = creds["AccessKeyId"]
-                    os.environ["AWS_SECRET_ACCESS_KEY"] = creds["SecretAccessKey"]
-                    os.environ["AWS_SESSION_TOKEN"] = creds["Token"]
-                    print("AWS credentials refreshed successfully", flush=True)
-                else:
-                    print(f"Failed to fetch fresh credentials: {response.status_code}", flush=True)
+
+        access_id, secret_key, token = get_session_token()
+
+        os.environ["AWS_ACCESS_KEY_ID"] = access_id
+        os.environ["AWS_SECRET_ACCESS_KEY"] = secret_key
+        os.environ["AWS_SESSION_TOKEN"] = token
+
+        print("AWS credentials refreshed successfully", flush=True)
+
+        return access_id, secret_key, token
+
     except Exception as e:
         print(f"Error refreshing credentials: {str(e)}", flush=True)
 
-async def get_balance_from_api(params: FunctionCallParams):
-    if params.arguments["username"] == 'suresh':
-        if params.arguments["secret_passcode"].lower() != 'nova sonic is awesome' or params.arguments["secret_passcode"].lower() != 'novasonic is awesome':
-            await params.result_callback(
-                {
-                    "balance": 5000 if params.arguments["account_type"] == 'savings' else 14000
-                }
-            )
+# async def get_balance_from_api(params: FunctionCallParams):
+#     if params.arguments["username"] == 'suresh':
+#         if params.arguments["secret_passcode"].lower() != 'nova sonic is awesome' or params.arguments["secret_passcode"].lower() != 'novasonic is awesome':
+#             await params.result_callback(
+#                 {
+#                     "balance": 5000 if params.arguments["account_type"] == 'savings' else 14000
+#                 }
+#             )
+#
+#         else:
+#             print('INCORRECT PASSCODE !')
+#             await params.result_callback(
+#                 {
+#                     "message": "Incorrect passcode."
+#                 }
+#             )
+#
+#     else:
+#         await params.result_callback(
+#             {
+#                 "message": "No such user found."
+#             }
+#         )
 
+async def generate_sql_query(params: FunctionCallParams):
+    """
+    Generate SQL query from natural language text using Claude 3.5 Sonnet V2.
+    """
+    try:
+        text = params.arguments["text"]
+        print("Text by User", text)
+        schema = params.arguments.get("schema")
+
+        query = sql_generator.generate_query(text, schema)
+
+        if query:
+            await params.result_callback({"response": query})
         else:
-            print('INCORRECT PASSCODE !')
-            await params.result_callback(
-                {
-                    "message": "Incorrect passcode."
-                }
-            )
+            await params.result_callback({"error": "Generated query appears invalid"})
 
-    else:
-        await params.result_callback(
-            {
-                "message": "No such user found."
-            }
-        )
+    except Exception as e:
+        await params.result_callback({"error": str(e)})
 
-weather_function = FunctionSchema(
-    name="get_balance",
-    description="Get an account balance.",
+
+# weather_function = FunctionSchema(
+#     name="get_balance",
+#     description="Get an account balance.",
+#     properties={
+#         "username": {
+#             "type": "string",
+#             "description": "The username for which the account balance is to be fetched.",
+#         },
+#         "secret_passcode": {
+#             "type": "string",
+#             "description": "A sentence to be used as the secret passcode to access the account details.",
+#         },
+#         "account_type": {
+#             "type": "string",
+#             "description": "The type of the account. Either savings or fixed deposit.",
+#         }
+#     },
+#     required=["username", "account_type"],
+# )
+
+sql_function = FunctionSchema(
+    name="generate_sql_query",
+    description="Generate an SQL query from natural language text using Claude 3.5 Sonnet model.",
     properties={
-        "username": {
+        "text": {
             "type": "string",
-            "description": "The username for which the account balance is to be fetched.",
-        },
-        "secret_passcode": {
-            "type": "string",
-            "description": "A sentence to be used as the secret passcode to access the account details.",
-        },
-        "account_type": {
-            "type": "string",
-            "description": "The type of the account. Either savings or fixed deposit.",
+            "description": "Natural language description of the desired SQL query.",
         }
     },
-    required=["username", "account_type"],
+    required=["text"],
 )
 
 # Create tools schema
-tools = ToolsSchema(standard_tools=[weather_function])
+# tools = ToolsSchema(standard_tools=[weather_function, sql_function])
+tools = ToolsSchema(standard_tools=[sql_function])
 
 async def setup(websocket: WebSocket):
     """
@@ -145,8 +179,15 @@ async def setup(websocket: WebSocket):
     - Event handlers for client connection/disconnection
     """
     update_dredentials()
-    
-    system_instruction = Path('prompt.txt').read_text() + f"\n{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
+
+    prompt_text = None
+
+    with open("/home/pulkitaa/Desktop/AWS PACE/virtual-assistant/backend/app/prompt.txt") as f:
+        prompt_text = f.read()
+
+    system_instruction = prompt_text + f"\n{AWSNovaSonicLLMService.AWAIT_TRIGGER_ASSISTANT_RESPONSE_INSTRUCTION}"
+
+    print("System instruction: ", system_instruction)
 
     # Configure WebSocket transport with audio processing capabilities
     transport = FastAPIWebsocketTransport(websocket, FastAPIWebsocketParams(
@@ -167,16 +208,17 @@ async def setup(websocket: WebSocket):
 
     # Initialize LLM service
     llm = AWSNovaSonicLLMService(
-        secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-        access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        session_token=os.getenv("AWS_SESSION_TOKEN"),
+        secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+        access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+        session_token=os.environ["AWS_SESSION_TOKEN"],
         region='us-east-1',
         voice_id="tiffany",  # Available voices: matthew, tiffany, amy
         params=params
     )
 
     # Register function for function calls
-    llm.register_function("get_balance", get_balance_from_api)
+    # llm.register_function("get_balance", get_balance_from_api)
+    llm.register_function("generate_sql_query", generate_sql_query)
 
     # Set up conversation context
     context = OpenAILLMContext(

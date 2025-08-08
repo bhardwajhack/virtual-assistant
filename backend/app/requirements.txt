@@ -6,3 +6,6 @@ boto3==1.36.26
 pipecat-ai[aws-nova-sonic,silero]==0.0.74
 httpx>=0.28.1
 onnxruntime
+anthropic>=0.8.1  # For Claude API types and constants
+psycopg2-binary==2.9.9  # PostgreSQL adapter for Python
+python-dotenv==1.0.0  # For environment variable management
